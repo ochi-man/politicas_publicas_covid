@@ -1,0 +1,2053 @@
+---
+title: "Estudo sobre as políticas de reabertura na cidade de São Paulo"
+author: "[Vitor Veloso](https://www.linkedin.com/in/vitor-veloso/)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+## Introdução:
+
+Essa é uma análise do impacto das políticas públicas adotadas para a reabertura do município de São Paulo, para essa análise, foram utilizados os dados do banco de dados de SRAG (Síndrome Respiratória Aguda Grave), aplicados nos dados do Ministério da Saúde.
+
+Os dados do Ministério da Saúde foram filtrados até última semana epidemiológica completa, caso contrário a variação entre os dias é tão grande que o estudo de um dia para outro apresentaria tendências completamente opostas.
+
+Os dados utilizados são filtrados também pela primeira politica adotada, a de uso de máscaras, dados anteriores a isso teriam muita variação e dependeria de análise individual de diversos acontecimento, e poderiam também afetar qualquer tendencia observada nas ultimas medidas adotadas.
+
+Para determinar a média de tempo entre os sintomas e a notificação, foram utilizados as datas do início dos sintomas, datas das notificações, e datas de óbitos, cruzando estes dados, foram encontrados muitos dados discrepantes, após filtrados foram adotados os valores de maior estabilidade e impacto, o intervalo entre 25% e 75% dos dados.
+
+Os gráficos utilizam uma regressão não linear para ser possível analisar os casos.
+
+Os marcos das medidas por semanas foram feitos utilizando a semana que se encontra o dia mínimo e a semana aonde se encontra o dia máximo.
+
+O uso do estudo dos óbitos servem para demonstrar mais claramente os efeitos das medidas, mesmo que haja um aumento das notificações, o que aumentaria o número de novos casos, a linha de óbitos manteria um retrato mais fiel ao resultado das medidas.
+
+A proposta desse documento é ser o mais visual e simplificado possível.
+
+
+## Dos Casos:
+
+Abaixo vemos a tabela de dados relativos a diferença dos dias entre sintomas, notificações e óbitos, nesses dados foram filtrados os pontos discrepantes:
+```{r}
+#install.packages("ggspectra")
+library(ggspectra)
+#remotes::install_github("liibre/coronabr")
+library(coronabr)
+library(tidyverse) 
+
+#?get_corona_minsaude
+#?get_corona_br
+#?get_corona_jhu
+# #dados_jhu_estado <- 
+# #  get_corona_jhu() %>% 
+# #  filter(country_region =="Brazil",
+# #         province_state=="Sao Paulo")
+# 
+# COVID_BRIO <- get_corona_br(ibge_cod = "3550308")
+# 
+
+
+
+# dados_ms <- 
+#   get_corona_minsaude(uf="SP") %>% 
+#   filter(codmun == "355030")
+
+OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
+REABRE_COMERCIO <- as.Date("2020-07-6")
+BAR_22 <- as.Date("2020-08-6")
+
+SRAG_DIAS <-
+  read.csv2("~/SRAG_DIAS.csv", sep=";") 
+
+SRAG_DIAS_DASA<- 
+  SRAG_DIAS[-c(1,5),]
+SRAG_DIAS_DASA<- 
+SRAG_DIAS_DASA[,c(1,2,3)]+c(2,5,14)
+
+
+dados_ms <-
+read.csv2("dados_ms.csv", sep=";") %>%
+  mutate(data=as.Date(data))
+
+dados_ms <-
+  dados_ms %>%
+      filter(data >= OBRIGATORIO_MASCARA) %>%
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  ungroup(semanaEpi)
+
+
+
+dados_ms_semanas <-
+dados_ms %>%
+    filter(data >= OBRIGATORIO_MASCARA) %>%
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  summarise(obitos=sum(casosNovos),casos=sum(casosNovos)) %>%
+  ungroup
+
+
+
+
+
+# 
+# sum(dados_ms$casosNovos)
+# sum(COVID_BRIO$new_deaths)
+# sum(dados_ms$casosNovos)
+# sum(COVID_BRIO$new_confirmed)
+media <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+maximo <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+MIN_SINT_NOT <- SRAG_DIAS_DASA["25%","TEMPO_SINTOMAS"]
+MED_SINT_NOT <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+MAX_SINT_NOT <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+
+
+MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","SINTOMA_OBITO"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["50%","SINTOMA_OBITO"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["75%","SINTOMA_OBITO"]
+
+SRAG_DIAS %>%
+  select("Sintomas e óbito"=SINTOMA_OBITO,
+         "Notificação e óbito"=NOTIFICACAO_OBITOS,
+         "Sintomas e notificação"=TEMPO_SINTOMAS)
+
+```
+
+Vamos agora somar os dias obtidos do site da DASA, relacionados ao tempo da contaminação até os sintomas, são estes:
+Entre 2 à 14 dias para os sintomas e 5 dias sendo o valor mais comum.
+
+Por haver uma variação muito grande, filtraremos os dados, mantendo apenas o intervalo de 25% até 75%:
+```{r}
+
+
+SRAG_DIAS_DASA%>%
+  select("Sintomas e óbito"=SINTOMA_OBITO,
+         "Notificação e óbito"=NOTIFICACAO_OBITOS,
+         "Sintomas e notificação"=TEMPO_SINTOMAS)
+
+```
+
+
+
+
+```{r}
+###############ANALISE MORTE X CASOS DEATHS VS CASES ############################
+media_abre <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= REABRE_COMERCIO+MIN_SINT_NOT &data <=  REABRE_COMERCIO +MAX_SINT_NOT) %>%
+  summarise(media = mean(casosNovos) ))
+
+media_mask <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA+MIN_SINT_NOT & data <=  OBRIGATORIO_MASCARA +MAX_SINT_NOT) %>%
+  summarise(media = mean(casosNovos) ))
+media_total <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA ) %>%
+  summarise(media = mean(casosNovos) ))
+
+plot_ms <-
+dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA) %>%
+   ggplot( aes(x=data, y=casosNovos)) +
+      xlab("")+  ylab("Novos Casos") +
+      scale_colour_manual(name = 'Legenda', 
+         values =c('NovosCasos'='blue','NovosObitos'='red'), labels = c('Novos Casos','Novos Óbitos'))
+      # scale_y_continuous(limits = c(0,8000)) 
+
+
+  #     geom_ribbon(aes(xmax=REABRE_COMERCIO+MAX_SINT_NOT,
+  #                     xmin=REABRE_COMERCIO+MIN_SINT_NOT,
+  #                     y=casosNovos),
+  #                 fill="lightblue",
+  #                 alpha=1, outline.type = "both") +
+      
+      #geom_rect(aes(ymin=-Inf, ymax=Inf, xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT), fill = "purple ", alpha = .0 ) + 
+
+plot_ms_medidas <- 
+  plot_ms +
+annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_NOT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = BAR_22+MIN_SINT_NOT, xmax = BAR_22+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      
+      
+        xlab("")+  ylab("Novos Casos\nNovos Óbitos")+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_NOT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_NOT,col="purple",se = FALSE) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="purple", alpha=.7) +
+        geom_point(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$casosNovos)*.75))+
+
+  geom_label(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$casosNovos)*.75, label = "Máscara\nObrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_NOT,col="purple",se = FALSE) +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_NOT,col="purple",se = FALSE) +
+geom_point(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.9 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.9, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="purple", alpha=.7) +
+geom_point(aes(x=REABRE_COMERCIO,y=max(dados_ms$casosNovos)*.875 ))+
+  geom_label(aes(x=REABRE_COMERCIO,y=max(dados_ms$casosNovos)*.875, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+
+geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ))+
+ geom_label(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_vline(xintercept = as.numeric(BAR_22),col="purple", alpha=.7) +
+geom_point(aes(x=BAR_22, y=max(dados_ms$casosNovos)*.875 ))+
+  geom_label(aes(x=BAR_22, y=max(dados_ms$casosNovos)*.875, label = "BAR até 22h"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  geom_vline(xintercept = as.numeric(BAR_22)+MIN_SINT_NOT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(BAR_22)+MAX_SINT_NOT,col="purple",se = FALSE) +
+
+  geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ))+
+  geom_label(aes(x=BAR_22+MAX_SINT_NOT, y=max(dados_ms$casosNovos), label = "BAR até 22h +MAX_SINT_NOT"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+              coord_cartesian(xlim=c(as.Date(OBRIGATORIO_MASCARA-2),
+                                     as.Date(max(dados_ms$data)+2)))+
+  
+     xlab("")+  ylab("Novos Casos")
+
+    # geom_segment(aes(x=REABRE_COMERCIO+MIN_SINT_NOT,xend=REABRE_COMERCIO+MAX_SINT_NOT,y=media_abre,yend=media_abre),col="purple ")+
+    #   geom_segment(aes(x=REABRE_COMERCIO+MIN_SINT_NOT,xend=REABRE_COMERCIO+MAX_SINT_NOT,y=media_total,yend=media_total),col="black")+
+    #   geom_segment(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_NOT,xend=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=media_mask,yend=media_mask),col="purple ")+
+    #     geom_segment(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_NOT,xend=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=media_total,yend=media_total),col="black")+
+
+    #    geom_hline(yintercept = media_abre,col="black", alpha=.7,mapping = subset()) +
+     #     geom_hline(yintercept = media_mask,col="black", alpha=.7) 
+
+```
+Com os dados do Ministério da Saúde, utilizando os novos casos notificados e os dias temos abaixo o gráfico:
+
+```{r}
+
+plot_ms +
+        geom_line() + 
+   
+  ggtitle("Novos Casos de Covid-19 no Município de São Paulo")+
+    xlab("")+  ylab("Novos Casos")
+
+```
+Agora vamos criar uma linha que suaviza esse gráfico, para podermos estudar melhor a sua variação:
+
+```{r}
+
+plot_ms +
+        geom_line() + 
+   geom_smooth(method='auto',aes(colour="NovosCasos"),size=.4,se=FALSE) +
+  ggtitle("Regressão não linear de novos Casos de Covid-19 no Município de São Paulo")+
+    xlab("")+  ylab("Novos Casos")
+    # scale_fill_identity(name = 'the fill', guide = 'legend',labels = c('m1')) +
+
+```
+
+
+
+```{r}
+
+plot_ms_semanas<-
+dados_ms_semanas %>%
+   # filter(semanaEpi >= 27) %>%
+  
+   ggplot( aes(x=semanaEpi, y=casos)) +
+  
+     scale_y_continuous(limits = c(0000,40000)) +
+      xlab("")+  ylab("Novos Casos")+
+        scale_colour_manual(name = 'Legenda', 
+         values =c('NovosCasos'='blue','NovosObitos'='red'), labels = c('Novos Casos','Novos Óbitos'))
+
+
+# # 
+# # plot_ms_semanas+
+# #   geom_line() 
+# # 
+
+
+
+```
+
+Para confirmar essa linha, vamos fazer outra para os dados por semanas:
+
+```{r}
+
+
+plot_ms_semanas+
+  geom_smooth(aes(colour="NovosCasos"))+
+  geom_line() +
+    
+  ggtitle("Regressão não linear de casos por semana epidemologica")
+```
+
+Vemos acima que o comportamento da linha demonstra uma tendência similar a linha por dias.
+
+Agora vamos aplicar esses dados sobre as principais medidas adotadas, para isso vamos usar aqueles dados da tabela para criar:
+1- Uma linha com a data da medida.
+2- Uma segunda linha que demonstra o começo do efeito da medida sobre os casos diários.
+3- Uma terceira linha que indica o dia máximo para efeito da medida.
+4- Uma área destacada juntando a linha de começo até a linha do dia máximo, para cada medida.
+
+Lembrando também que estamos adotando valores que expressão melhor a maioria dos casos.
+
+```{r}
+plot_ms_medidas+
+        # geom_line() + 
+   geom_smooth(method='auto',aes(colour="NovosCasos"),size=.4,se = FALSE) +
+  ggtitle("Regressão não linear em comparação as medidas")+
+    xlab("")+  ylab("Novos Casos")
+# 
+# plot_ms_medidas+
+#   geom_smooth()
+# 
+# plot_ms+
+#   geom_smooth()
+
+
+
+```
+Agora os mesmos com a linha por semanas:
+
+```{r}
+SEM_MED <-
+dados_ms %>%
+  filter(data>=REABRE_COMERCIO+MIN_SINT_NOT & data<=REABRE_COMERCIO+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+library(ggrepel)
+
+REABRE_COMERCIO_SEM_MAX <- max(SEM_MED)
+REABRE_COMERCIO_SEM_MIN <- min(SEM_MED)
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=OBRIGATORIO_MASCARA+MIN_SINT_NOT & data<=OBRIGATORIO_MASCARA+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+MASK_SEM_MAX <- max(SEM_MED)
+MASK_SEM_MIN <- min(SEM_MED)
+
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=BAR_22+MIN_SINT_NOT & data<=BAR_22+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+BAR22_SEM_MAX <- max(SEM_MED)
+BAR22_SEM_MIN <- min(SEM_MED)
+
+#dados_ms_semanas$
+plot_ms_semanas+
+  geom_smooth(aes(colour="NovosCasos")) +
+
+   annotate("rect",xmin = REABRE_COMERCIO_SEM_MIN, xmax = REABRE_COMERCIO_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = MASK_SEM_MIN, xmax = MASK_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = BAR22_SEM_MIN, xmax = BAR22_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+     geom_vline(xintercept = as.numeric(MASK_SEM_MIN),col="purple", alpha=.7) +
+     geom_point(aes(x=MASK_SEM_MIN,y=max(dados_ms_semanas$casos)*1.4))+
+     geom_vline(xintercept = MASK_SEM_MIN,col="purple") +
+     geom_vline(xintercept =MASK_SEM_MAX,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MIN,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MAX,col="purple") +
+
+
+  geom_label(aes(x=MASK_SEM_MIN,y=max(dados_ms_semanas$casos)*1.4, label = "Máscara\nObrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+geom_point(aes(x=MASK_SEM_MAX,y=max(dados_ms_semanas$casos)*1.4 ))+
+  geom_label(aes(x=MASK_SEM_MAX,y=max(dados_ms_semanas$casos)*1.4, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_semanas$casos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_semanas$casos)*1.2, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_semanas$casos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_semanas$casos)*1.2 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_vline(xintercept = BAR22_SEM_MIN,col="purple", alpha=.7) +
+  geom_vline(xintercept = BAR22_SEM_MAX,col="purple") +
+  geom_point(aes(x=BAR22_SEM_MIN, y=max(dados_ms_semanas$casos)*1.2 ))+
+  geom_label(aes(x=BAR22_SEM_MIN, y=max(dados_ms_semanas$casos)*1.2, label = "BAR até 22h"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+ 
+              coord_cartesian(xlim=c(MASK_SEM_MIN-2,
+                                     max(dados_ms_semanas$semanaEpi)+1))+
+  
+
+  ggtitle("Regressão não linear em comparação as medidas\npor semana epidemologica")
+
+
+```
+Podemos ver melhor nesse gráfico acima o que se confirma no anterior, existe um aumento entre o dia máximo do uso de máscaras e da reabertura.
+
+Vamos agora analisar as datas das medidas:
+```{r}
+
+# plot_ms_medidas+
+#     geom_smooth(method = lm,aes(colour="NovosCasos"))+  
+#   ggtitle("Regressão linear em comparação as medidas")
+# 
+
+
+```
+
+
+
+
+
+```{r}
+plot_ms_apenas_medidas <-
+  plot_ms +
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_NOT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+      # annotate("rect",xmin = BAR_22+MIN_SINT_NOT, xmax = BAR_22+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+ #     scale_y_continuous(limits = c(0,6500)) +
+      
+      
+        xlab("")+  ylab("Novos Casos")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="black", alpha=.7) +
+   # geom_text(aes(x=OBRIGATORIO_MASCARA, y= 6500, label = "Máscara Obrigatória"),
+   #          colour = "black",
+   #          family="Courier",
+   #          hjust = 1,
+   #          vjust = -.4,
+   #          angle = 90,
+   #          size = 5,
+   #          alpha=1)+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_NOT,col="purple ") +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_NOT,col="purple ") +
+      geom_text(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT, y= 6500, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+  # geom_text(aes(x=REABRE_COMERCIO, y= 6500, label = "Reabertura"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_NOT,col="purple ") +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_NOT,col="purple ") +
+  geom_text(aes(x=REABRE_COMERCIO+MAX_SINT_NOT, y= 6500, label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)#+
+#BAR SEM VALORES
+#  geom_vline(xintercept = as.numeric(BAR_22),col="black", alpha=.7) +
+  # geom_text(aes(x=BAR_22, y= 6500, label = "BAR até 22h"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)+
+  # geom_vline(xintercept = as.numeric(BAR_22)+MIN_SINT_NOT,col="purple ") +
+  # geom_vline(xintercept = as.numeric(BAR_22)+MAX_SINT_NOT,col="purple ") +
+  # geom_text(aes(x=BAR_22+MAX_SINT_NOT, y= 6500, label = "BAR até 22h +MAX_SINT_NOT"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)
+#   # 
+# plot_ms_apenas_medidas +
+#     ggtitle("Comparação de datas de efetividade das medidas")
+
+```
+
+
+```{r}
+# plot_ms_apenas_medidas +
+#        annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT , xmax =  OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+#     ggtitle("Comparação de datas de efetividade das medidas\ndestaque")
+
+
+plot_ms+
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_NOT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      
+        xlab("")+  ylab("Novos Casos\nNovos Óbitos")+
+
+  # geom_vline(xintercept = as.Date(OBRIGATORIO_MASCARA),col="purple", alpha=.7) +
+  #       geom_point(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$casosNovos)*.75))+
+  # 
+  # geom_label(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$casosNovos)*.75, label = "Máscara\nObrigatória"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+      geom_vline(xintercept = as.Date(OBRIGATORIO_MASCARA)+MIN_SINT_NOT,col="purple",se = FALSE) +
+      geom_vline(xintercept = as.Date(OBRIGATORIO_MASCARA)+MAX_SINT_NOT,col="purple",se = FALSE) +
+    geom_vline(xintercept = as.Date(REABRE_COMERCIO)+MAX_SINT_NOT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.Date(REABRE_COMERCIO)+MIN_SINT_NOT,col="purple",se = FALSE) +
+geom_point(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.875 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.875, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  # geom_vline(xintercept = as.Date(REABRE_COMERCIO),col="black", alpha=.7) +
+# geom_point(aes(x=REABRE_COMERCIO,y=max(dados_ms$casosNovos)*.875 ))+
+  # geom_label(aes(x=REABRE_COMERCIO,y=max(dados_ms$casosNovos)*.875, label = "Reabertura"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+
+
+geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ))+
+  geom_label(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_point(aes(x=REABRE_COMERCIO+MIN_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ))+
+  geom_label(aes(x=REABRE_COMERCIO+MIN_SINT_NOT,y=max(dados_ms$casosNovos)*.75 ,label = "Linha mínima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_point(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_NOT,y=max(dados_ms$casosNovos)*.875 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_NOT,y=max(dados_ms$casosNovos)*.875 ,label = "Linha mínima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+            coord_cartesian(ylim=c(0,max(dados_ms$casosNovos)),
+                              xlim=c(as.Date(OBRIGATORIO_MASCARA),
+                                     as.Date(REABRE_COMERCIO+MAX_SINT_NOT+5)))+
+
+      xlab("")+ 
+   ylab("")+
+
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank())+
+     ggtitle("Comparação entre os efeitos das medidas")
+
+  # # ggtitle("Regressão não linear em comparação as medidas\npor semana epidemologica")
+
+
+```
+
+
+Como pode ser claramente observado temos uma sobreposição das medidas de uso de máscara e reabertura, esse valor é maior que 63% dos dias totais das duas.
+
+Isso mostra que uma medida tem grande influência na outra.
+```{r}
+# #INTERNO
+# #REABRE_COMERCIO+MIN_SINT_NOT
+# #OBRIGATORIO_MASCARA+MAX_SINT_NOT
+# difftime(OBRIGATORIO_MASCARA+MAX_SINT_NOT ,REABRE_COMERCIO+MIN_SINT_NOT )
+# 
+# #EXTERNO
+# #total
+# #REABRE_COMERCIO+MAX_SINT_NOT
+# #OBRIGATORIO_MASCARA+MIN_SINT_NOT
+# difftime(REABRE_COMERCIO+MAX_SINT_NOT, OBRIGATORIO_MASCARA+MIN_SINT_NOT)
+# # 
+# # 
+#  as.numeric(difftime(OBRIGATORIO_MASCARA+MAX_SINT_NOT ,REABRE_COMERCIO+MIN_SINT_NOT))/
+#  as.numeric(difftime(REABRE_COMERCIO+MAX_SINT_NOT, OBRIGATORIO_MASCARA+MIN_SINT_NOT))  
+# # 
+
+```
+Agora faremos uma análise individual de cada medida usando uma linha de tendência.
+
+
+```{r}
+
+# media <- as.numeric(dados_ms %>%
+#   #filtra data
+#   filter(data > "2020-07-01") %>%
+#   summarise(media = mean(casosNovos) ))
+
+
+
+plot_ms +
+      geom_segment(y=media_mask,yend=media_mask,xend=OBRIGATORIO_MASCARA+MAX_SINT_NOT,x=OBRIGATORIO_MASCARA+MIN_SINT_NOT)+
+  #geom_smooth(method = lm,data=subset(dados_ms, data>=REABRE_COMERCIO +MIN_SINT_NOT & data<=REABRE_COMERCIO+MAX_SINT_NOT),col="purple ")+
+      geom_smooth(method = lm,data=subset(dados_ms, data>=OBRIGATORIO_MASCARA +MIN_SINT_NOT & data<=OBRIGATORIO_MASCARA+MAX_SINT_NOT),aes(colour="NovosCasos"),se = FALSE)+
+        #geom_smooth(method = lm,data=subset(dados_ms, data>=BAR_22 +MIN_SINT_NOT & data<=BAR_22+MAX_SINT_NOT),col="purple ")+
+#geom_smooth()+
+#geom_line()+
+ #     geom_hline(yintercept = media,col="black", alpha=.7) +
+#     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_NOT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+#      annotate("rect",xmin = BAR_22+MIN_SINT_NOT, xmax = BAR_22+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+
+  xlab("")+  ylab("Novos Casos")+
+  ggtitle("Regressão linear para medida de uso de Máscaras")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="black", alpha=.7) +
+  geom_text(aes(x=OBRIGATORIO_MASCARA, y= 4000, label = "Máscara Obrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = +1,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)+
+              coord_cartesian(ylim=c(0,max(4000)))
+
+```
+
+
+```{r}
+
+# media <- as.numeric(dados_ms %>%
+#   #filtra data
+#   filter(data > "2020-07-01") %>%
+#   summarise(media = mean(casosNovos) ))
+
+
+
+plot_ms +
+  
+    geom_segment(y=media_abre,yend=media_abre,xend=REABRE_COMERCIO+MAX_SINT_NOT,x=REABRE_COMERCIO+MIN_SINT_NOT)+
+  geom_smooth(method = lm,data=subset(dados_ms, data>=REABRE_COMERCIO +MIN_SINT_NOT & data<=REABRE_COMERCIO+MAX_SINT_NOT),aes(colour="NovosCasos"),se = FALSE)+
+        #geom_smooth(method = lm,data=subset(dados_ms, data>=BAR_22 +MIN_SINT_NOT & data<=BAR_22+MAX_SINT_NOT),col="purple ")+
+#geom_smooth()+
+#geom_line()+
+ #     geom_hline(yintercept = media,col="black", alpha=.7) +
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+#      annotate("rect",xmin = BAR_22+MIN_SINT_NOT, xmax = BAR_22+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple ")+
+ geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+  geom_text(aes(x=REABRE_COMERCIO, y= 4000, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = +1,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_NOT,col="purple ") +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_NOT,col="purple ") +
+  ggtitle("Regressão linear para a reabertura")+
+    theme(plot.title = element_text(hjust = 0.5))+
+              coord_cartesian(ylim=c(0,max(4000)))+
+
+
+
+  xlab("")
+
+x<- 
+lm(data=dados_ms, formula=casosNovos ~ data)
+```
+Notamos uma estabilidade dos casos na medida de uso de máscara um aumento na medida de reabertura.
+É observável que as medidas se afetam, porém o quanto isso é de fato um aumento e quanto isso pode estar relacionado aos aumentos dos testes, veremos isso na terceira parte dessa análise.
+
+## Dos Óbitos:
+
+
+```{r}
+#install.packages("ggspectra")
+library(ggspectra)
+#remotes::install_github("liibre/coronabr")
+library(coronabr)
+library(tidyverse) 
+
+#?get_corona_minsaude
+#?get_corona_br
+#?get_corona_jhu
+# #dados_jhu_estado <- 
+# #  get_corona_jhu() %>% 
+# #  filter(country_region =="Brazil",
+# #         province_state=="Sao Paulo")
+# 
+# COVID_BRIO <- get_corona_br(ibge_cod = "3550308")
+# 
+
+
+# dados_ms <-
+#   get_corona_minsaude(uf="SP") %>%
+#   filter(codmun == "355030")
+# write.csv2(dados_ms,"dados_ms.csv", sep=";")
+#gc()
+OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
+REABRE_COMERCIO <- as.Date("2020-07-6")
+BAR_22 <- as.Date("2020-08-6")
+
+SRAG_DIAS <-
+  read.csv2("~/SRAG_DIAS.csv", sep=";") 
+
+SRAG_DIAS_DASA<- 
+  SRAG_DIAS[-c(1,5),]
+SRAG_DIAS_DASA<- 
+SRAG_DIAS_DASA[,c(1,2,3)]+c(2,5,14)
+
+MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","TEMPO_SINTOMAS"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+MAX_SINT_OBT <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+dados_ms <-
+read.csv2("dados_ms.csv", sep=";") %>%
+  mutate(data=as.Date(data))
+
+dados_ms <-
+  dados_ms %>%
+      filter(data >= OBRIGATORIO_MASCARA) %>%
+
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  ungroup(semanaEpi)
+
+
+
+dados_ms_semanas <-
+dados_ms %>%
+    filter(data >= OBRIGATORIO_MASCARA) %>%
+
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  
+  summarise(obitos=sum(obitosNovos),casos=sum(obitosNovos)) %>%
+  ungroup
+
+
+
+
+
+# 
+# sum(dados_ms$obitosNovos)
+# sum(COVID_BRIO$new_deaths)
+# sum(dados_ms$obitosNovos)
+# sum(COVID_BRIO$new_confirmed)
+MIN_SINT_OBT <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[2])+2
+media <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[3])+5
+maximo <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[4])+14
+
+MIN_SINT_NOT <- SRAG_DIAS_DASA["25%","TEMPO_SINTOMAS"]
+MED_SINT_NOT <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+MAX_SINT_NOT <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+
+
+MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","SINTOMA_OBITO"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["50%","SINTOMA_OBITO"]
+MAX_SINT_OBT <- SRAG_DIAS_DASA["75%","SINTOMA_OBITO"]
+
+
+```
+
+
+
+
+
+```{r}
+###############ANALISE MORTE X CASOS DEATHS VS CASES ############################
+media_abre <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= REABRE_COMERCIO+MIN_SINT_OBT &data <=  REABRE_COMERCIO +MAX_SINT_OBT) %>%
+  summarise(media = mean(obitosNovos) ))
+
+media_mask <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA+MIN_SINT_OBT & data <=  OBRIGATORIO_MASCARA +MAX_SINT_OBT) %>%
+  summarise(media = mean(obitosNovos) ))
+media_total <- as.numeric(dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA ) %>%
+  summarise(media = mean(obitosNovos) ))
+
+plot_ms <-
+dados_ms %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA) %>%
+   ggplot( aes(x=data, y=obitosNovos)) +
+      xlab("")+  ylab("Novos Óbitos") +
+      scale_y_continuous(limits = c(0,200)) +
+      scale_colour_manual(name = 'Legenda', 
+         values =c('blue','red'), 
+	breaks=c("NovosCasos","NovosObitos"),
+	 labels = c('Novos Casos','Novos Óbitos'))
+
+
+  #     geom_ribbon(aes(xmax=REABRE_COMERCIO+MAX_SINT_OBT,
+  #                     xmin=REABRE_COMERCIO+MIN_SINT_OBT,
+  #                     y=obitosNovos),
+  #                 fill="lightred",
+  #                 alpha=1, outline.type = "both") +
+      
+      #geom_rect(aes(ymin=-Inf, ymax=Inf, xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT), fill = "red", alpha = .0 ) + 
+
+plot_ms_medidas_obitos <- 
+  plot_ms +
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_OBT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = BAR_22+MIN_SINT_OBT, xmax = BAR_22+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      
+      
+        xlab("")+  ylab("Novos Casos\nNovos Óbitos")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+        geom_point(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$obitosNovos)*.75))+
+
+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_OBT,col="purple",se = FALSE) +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_OBT,col="purple",se = FALSE) +
+geom_point(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.97 ))+
+    geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_OBT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_OBT,col="purple",se = FALSE) +
+geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.75 ))+
+    geom_vline(xintercept = as.numeric(BAR_22),col="black",size=1.5, alpha=.7) +
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="black",size=1.5, alpha=.7) +
+
+    geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black",size=1.5, alpha=.7) +
+geom_point(aes(x=BAR_22, y=max(dados_ms$obitosNovos)*.875 ))+
+
+    geom_label(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$obitosNovos)*.75, label = "Máscara\nObrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.97, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+geom_point(aes(x=REABRE_COMERCIO,y=max(dados_ms$obitosNovos)*.88 ))+
+  geom_label(aes(x=REABRE_COMERCIO,y=max(dados_ms$obitosNovos)*.88, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+  geom_label(aes(x=REABRE_COMERCIO+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.70 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_label(aes(x=BAR_22, y=max(dados_ms$obitosNovos)*.875, label = "BAR até 22h"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  geom_vline(xintercept = as.numeric(BAR_22)+MIN_SINT_OBT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(BAR_22)+MAX_SINT_OBT,col="purple",se = FALSE) +
+
+  geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.70 ))+
+  geom_label(aes(x=BAR_22+MAX_SINT_OBT, y=max(dados_ms$obitosNovos), label = "BAR até 22h +MAX_SINT_OBT"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+              coord_cartesian(xlim=c(as.Date(OBRIGATORIO_MASCARA-2),
+                                     as.Date(max(dados_ms$data)+2)))+
+  
+      xlab("")+  ylab("Novos Óbitos")
+      # xlab("")+  ylab("Novos Óbitos")
+
+    # geom_segment(aes(x=REABRE_COMERCIO+MIN_SINT_OBT,xend=REABRE_COMERCIO+MAX_SINT_OBT,y=media_abre,yend=media_abre),se = FALSE, aes(colour="NovosObitos"))+
+    #   geom_segment(aes(x=REABRE_COMERCIO+MIN_SINT_OBT,xend=REABRE_COMERCIO+MAX_SINT_OBT,y=media_total,yend=media_total),col="black")+
+    #   geom_segment(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_OBT,xend=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=media_mask,yend=media_mask),se = FALSE, aes(colour="NovosObitos"))+
+    #     geom_segment(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_OBT,xend=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=media_total,yend=media_total),col="black")+
+
+    #    geom_hline(yintercept = media_abre,col="black", alpha=.7,mapping = subset()) +
+     #     geom_hline(yintercept = media_mask,col="black", alpha=.7) +
+
+
+```
+
+Agora vamos criar uma linha que suaviza esse o gráfico em relação aos óbitos:
+```{r}
+
+# plot_ms +
+#         geom_line() + 
+#    
+#   ggtitle("Novos Casos de Covid-19 no Município de São Paulo")+
+#     xlab("")+  ylab("Novos Óbitos")
+
+```
+
+```{r}
+
+plot_ms +
+        geom_line() + 
+   geom_smooth(method='auto',se = FALSE, size=.4,aes(colour="NovosObitos")) +
+  ggtitle("Regressão não linear de novos óbitos por Covid-19 no Município de São Paulo")+
+    theme(plot.title = element_text(hjust = 0.5))+
+
+    xlab("")+  ylab("Novos Óbitos")
+
+#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+```
+
+
+```{r}
+# 
+plot_ms_semanas<-
+dados_ms_semanas %>%
+    filter(semanaEpi >= 27) %>%
+   ggplot( aes(x=semanaEpi, y=obitos)) +
+     scale_y_continuous(limits = c(0,1000)) +
+      xlab("")+  ylab("Novos Óbitos")+
+      scale_colour_manual(name = 'Legenda', 
+         values =c('blue','red'), 
+	breaks=c("NovosCasos","NovosObitos"),
+	 labels = c('Novos Casos','Novos Óbitos'))
+
+
+# plot_ms_semanas+
+#   geom_line()
+# 
+
+
+
+```
+Assim como com os casos vamos também criar uma linha utilizando os dados por semanas:
+```{r}
+
+
+plot_ms_semanas+
+  geom_line() +
+    geom_smooth(se = FALSE, aes(colour="NovosObitos"))+
+
+    theme(plot.title = element_text(hjust = 0.5))+
+
+ ylab("Novos Óbitos\npor semanas")+
+  ggtitle("Regressão não linear de óbitos por semana epidemologica")
+```
+
+Agora estudaremos a linha sobre as medidas, neste caso os efeitos das medidas foram calculados utilizando a tabela do início do documento, porém desta vez vamos utilizar os valores para sintomas até o óbito.
+
+```{r}
+plot_ms_medidas_obitos+
+        # geom_line() + 
+   geom_smooth(method='auto',aes(colour="NovosObitos"),se = FALSE, size=.4) +
+  ggtitle("Regressão não linear em comparação as medidas")+
+    xlab("")+  ylab("Novos Óbitos")
+# 
+# plot_ms_medidas_obitos+
+#   geom_smooth()
+# 
+# plot_ms+
+#   geom_smooth()
+
+
+
+```
+
+Vamos agora fazer como na análise dos casos e comparar a linha por semana com as medidas:
+```{r}
+SEM_MED <-
+dados_ms %>%
+  filter(data>=REABRE_COMERCIO+MIN_SINT_OBT & data<=REABRE_COMERCIO+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+library(ggrepel)
+
+REABRE_COMERCIO_SEM_MAX <- max(SEM_MED)
+REABRE_COMERCIO_SEM_MIN <- min(SEM_MED)
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=OBRIGATORIO_MASCARA+MIN_SINT_OBT & data<=OBRIGATORIO_MASCARA+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+MASK_SEM_MAX <- max(SEM_MED)
+MASK_SEM_MIN <- min(SEM_MED)
+
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=BAR_22+MIN_SINT_OBT & data<=BAR_22+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+BAR22_SEM_MAX <- max(SEM_MED)
+BAR22_SEM_MIN <- min(SEM_MED)
+
+#dados_ms_semanas$
+plot_ms_semanas+
+
+   annotate("rect",xmin = REABRE_COMERCIO_SEM_MIN, xmax = REABRE_COMERCIO_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = MASK_SEM_MIN, xmax = MASK_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      # annotate("rect",xmin = BAR22_SEM_MIN, xmax = BAR22_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+     geom_vline(xintercept = as.numeric(MASK_SEM_MIN),col="purple", alpha=.7) +
+     geom_point(aes(x=MASK_SEM_MIN,y=max(dados_ms_semanas$obitos)*1))+
+     geom_vline(xintercept = MASK_SEM_MIN,col="purple") +
+     geom_vline(xintercept =MASK_SEM_MAX,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MIN,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MAX,col="purple") +
+
+
+  geom_label(aes(x=MASK_SEM_MIN,y=max(dados_ms_semanas$obitos)*1, label = "Máscara\nObrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+geom_point(aes(x=MASK_SEM_MAX,y=max(dados_ms_semanas$obitos)*1 ))+
+  geom_label(aes(x=MASK_SEM_MAX,y=max(dados_ms_semanas$obitos)*1, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_semanas$obitos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_semanas$obitos)*1.2, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_semanas$obitos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_semanas$obitos)*1.2 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  # geom_vline(xintercept = BAR22_SEM_MIN,col="purple", alpha=.7) +
+  # geom_vline(xintercept = BAR22_SEM_MAX,col="purple") +
+  # geom_point(aes(x=BAR22_SEM_MIN, y=max(dados_ms_semanas$obitos)*1.2 ))+
+  # geom_label(aes(x=BAR22_SEM_MIN, y=max(dados_ms_semanas$obitos)*1.2, label = "BAR até 22h"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+ 
+              coord_cartesian(xlim=c(MASK_SEM_MIN-2,
+                                     max(dados_ms_semanas$semanaEpi)+1))+
+ ylab("Novos Óbitos\npor semanas")+
+    geom_smooth(se=FALSE,aes(colour="NovosObitos")) +
+
+  ggtitle("Regressão não linear em comparação as medidas\npor semana epidemologica")
+
+```
+É claramente observável uma queda acentuada durante o efeito da medida de obrigatoriedade do uso de máscaras, sendo seguida por um aumento durante os efeitos da reabertura.
+Assim como nos casos vemos uma sobreposição dos efeitos das medidas:
+```{r}
+#   as.numeric(difftime(OBRIGATORIO_MASCARA+MAX_SINT_OBT ,REABRE_COMERCIO+MIN_SINT_OBT))/
+#   as.numeric(difftime(REABRE_COMERCIO+MAX_SINT_OBT, OBRIGATORIO_MASCARA+MIN_SINT_OBT))  
+# # # 
+
+```
+
+
+```{r}
+SEM_MED <-
+dados_ms %>%
+  filter(data>=REABRE_COMERCIO+MIN_SINT_OBT & data<=REABRE_COMERCIO+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+library(ggrepel)
+
+REABRE_COMERCIO_SEM_MAX <- max(SEM_MED)
+REABRE_COMERCIO_SEM_MIN <- min(SEM_MED)
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=OBRIGATORIO_MASCARA+MIN_SINT_OBT & data<=OBRIGATORIO_MASCARA+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+MASK_SEM_MAX <- max(SEM_MED)
+MASK_SEM_MIN <- min(SEM_MED)
+
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=BAR_22+MIN_SINT_OBT & data<=BAR_22+MAX_SINT_OBT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+BAR22_SEM_MAX <- max(SEM_MED)
+BAR22_SEM_MIN <- min(SEM_MED)
+
+
+plot_ms_semanas+
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_OBT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      
+        xlab("")+  ylab("Novos Casos\nNovos Óbitos")+
+
+  # geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="purple", alpha=.7) +
+  #       geom_point(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$obitosNovos)*.75))+
+  # 
+  # geom_label(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms$obitosNovos)*.75, label = "Máscara\nObrigatória"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_OBT,col="purple",se = FALSE) +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_OBT,col="purple",se = FALSE) +
+geom_point(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.875 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.875, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  # geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+# geom_point(aes(x=REABRE_COMERCIO,y=max(dados_ms$obitosNovos)*.875 ))+
+  # geom_label(aes(x=REABRE_COMERCIO,y=max(dados_ms$obitosNovos)*.875, label = "Reabertura"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_OBT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_OBT,col="purple",se = FALSE) +
+geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.75 ))+
+  geom_label(aes(x=REABRE_COMERCIO+MAX_SINT_OBT,y=max(dados_ms$obitosNovos)*.75 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_point(aes(x=REABRE_COMERCIO+MIN_SINT_OBT,y=max(dados_ms$obitosNovos)*.75 ))+
+  geom_label(aes(x=REABRE_COMERCIO+MIN_SINT_OBT,y=max(dados_ms$obitosNovos)*.75 ,label = "Linha mínima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_point(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_OBT,y=max(dados_ms$obitosNovos)*.875 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MIN_SINT_OBT,y=max(dados_ms$obitosNovos)*.875 ,label = "Linha mínima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+            coord_cartesian(ylim=c(0,max(dados_ms$obitosNovos)),
+                              xlim=c(as.Date(OBRIGATORIO_MASCARA),
+                                     as.Date(REABRE_COMERCIO+MAX_SINT_OBT+5)))+
+  
+      xlab("")+  
+  ylab("")+
+  
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.ticks.y = element_blank(),
+          axis.text.y = element_blank())+
+   ggtitle("Comparação entre os efeitos das medidas")
+
+
+```
+Como vemos acima, no caso dos óbitos é maior a interferência de uma na outra, chegando a 73%.
+```{r}
+
+# plot_ms_medidas_obitos+
+#     geom_smooth(method = lm,se = FALSE, aes(colour="NovosObitos"))+  
+#   ggtitle("Regressão linear em comparação as medidas")
+
+
+
+```
+
+
+
+```{r}
+plot_ms_apenas_medidas <-
+  plot_ms +
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_OBT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+      # annotate("rect",xmin = BAR_22+MIN_SINT_OBT, xmax = BAR_22+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+ #     scale_y_continuous(limits = c(0,1550)) +
+      
+      
+        xlab("")+  ylab("Novos Óbitos")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="black", alpha=.7) +
+   # geom_text(aes(x=OBRIGATORIO_MASCARA, y= 1550, label = "Máscara Obrigatória"),
+   #          colour = "black",
+   #          family="Courier",
+   #          hjust = 1,
+   #          vjust = -.4,
+   #          angle = 90,
+   #          size = 5,
+   #          alpha=1)+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+      geom_text(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_OBT, y= 1550, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+  # geom_text(aes(x=REABRE_COMERCIO, y= 1550, label = "Reabertura"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+  geom_text(aes(x=REABRE_COMERCIO+MAX_SINT_OBT, y= 1550, label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)#+
+#BAR SEM VALORES
+#  geom_vline(xintercept = as.numeric(BAR_22),col="black", alpha=.7) +
+  # geom_text(aes(x=BAR_22, y= 1550, label = "BAR até 22h"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)+
+  # geom_vline(xintercept = as.numeric(BAR_22)+MIN_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+  # geom_vline(xintercept = as.numeric(BAR_22)+MAX_SINT_OBT,se = FALSE, aes(colour="NovosObitos")) +
+  # geom_text(aes(x=BAR_22+MAX_SINT_OBT, y= 1550, label = "BAR até 22h +MAX_SINT_OBT"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 1,
+  #           vjust = -.4,
+  #           angle = 90,
+  #           size = 5,
+  #           alpha=1)
+#   # 
+# plot_ms_apenas_medidas +
+#     ggtitle("Comparação de datas de efetividade das medidas")
+
+```
+
+
+Calculo 0.6363636
+
+```{r}
+# #INTERNO
+# #REABRE_COMERCIO+MIN_SINT_OBT
+# #OBRIGATORIO_MASCARA+MAX_SINT_OBT
+# difftime(OBRIGATORIO_MASCARA+MAX_SINT_OBT ,REABRE_COMERCIO+MIN_SINT_OBT )
+# 
+# #EXTERNO
+# #total
+# #REABRE_COMERCIO+MAX_SINT_OBT
+# #OBRIGATORIO_MASCARA+MIN_SINT_OBT
+# difftime(REABRE_COMERCIO+MAX_SINT_OBT, OBRIGATORIO_MASCARA+MIN_SINT_OBT)
+# # 
+# # 
+#  as.numeric(difftime(OBRIGATORIO_MASCARA+MAX_SINT_OBT ,REABRE_COMERCIO+MIN_SINT_OBT))/
+#  as.numeric(difftime(REABRE_COMERCIO+MAX_SINT_OBT, OBRIGATORIO_MASCARA+MIN_SINT_OBT))  
+# # 
+
+```
+Agora vamos observar os a linha de tendência dos óbitos pelas medidas:
+
+```{r}
+
+# media <- as.numeric(dados_ms %>%
+#   #filtra data
+#   filter(data > "2020-07-01") %>%
+#   summarise(media = mean(obitosNovos) ))
+
+
+
+plot_ms +
+      geom_segment(y=media_mask,yend=media_mask,xend=OBRIGATORIO_MASCARA+MAX_SINT_OBT,x=OBRIGATORIO_MASCARA+MIN_SINT_OBT)+
+  #geom_smooth(method = lm,data=subset(dados_ms, data>=REABRE_COMERCIO +MIN_SINT_OBT & data<=REABRE_COMERCIO+MAX_SINT_OBT),se = FALSE, aes(colour="NovosObitos"))+
+      geom_smooth(method = lm,data=subset(dados_ms, data>=OBRIGATORIO_MASCARA +MIN_SINT_OBT & data<=OBRIGATORIO_MASCARA+MAX_SINT_OBT),se = FALSE, aes(colour="NovosObitos"))+
+        #geom_smooth(method = lm,data=subset(dados_ms, data>=BAR_22 +MIN_SINT_OBT & data<=BAR_22+MAX_SINT_OBT),se = FALSE, aes(colour="NovosObitos"))+
+#geom_smooth()+
+#geom_line()+
+ #     geom_hline(yintercept = media,col="black", alpha=.7) +
+#     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_OBT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+#      annotate("rect",xmin = BAR_22+MIN_SINT_OBT, xmax = BAR_22+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+
+  xlab("")+  ylab("Novos Óbitos")+
+  ggtitle("Regressão linear para medida de uso de Máscaras")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="black", alpha=.7) +
+  
+    geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_OBT,se = FALSE, col="purple") +
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_OBT,se = FALSE, col="purple") +
+  geom_text(aes(x=OBRIGATORIO_MASCARA, y= 200, label = "Máscara Obrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = +1,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)
+```
+
+
+```{r}
+
+# media <- as.numeric(dados_ms %>%
+#   #filtra data
+#   filter(data > "2020-07-01") %>%
+#   summarise(media = mean(obitosNovos) ))
+
+
+
+plot_ms +
+  
+    geom_segment(y=media_abre,yend=media_abre,xend=REABRE_COMERCIO+MAX_SINT_OBT,x=REABRE_COMERCIO+MIN_SINT_OBT)+
+  geom_smooth(method = lm,data=subset(dados_ms, data>=REABRE_COMERCIO +MIN_SINT_OBT & data<=REABRE_COMERCIO+MAX_SINT_OBT),se = FALSE, aes(colour="NovosObitos"))+
+        #geom_smooth(method = lm,data=subset(dados_ms, data>=BAR_22 +MIN_SINT_OBT & data<=BAR_22+MAX_SINT_OBT),se = FALSE, aes(colour="NovosObitos"))+
+#geom_smooth()+
+#geom_line()+
+ #     geom_hline(yintercept = media,col="black", alpha=.7) +
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_OBT, xmax = REABRE_COMERCIO+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+#      annotate("rect",xmin = BAR_22+MIN_SINT_OBT, xmax = BAR_22+MAX_SINT_OBT, ymin = -Inf, ymax =Inf,alpha=.3,fill="red")+
+ geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+  geom_text(aes(x=REABRE_COMERCIO, y= 200, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 1,
+            vjust = -.4,
+            angle = 90,
+            size = 5,
+            alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_OBT,se = FALSE, col="purple") +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_OBT,se = FALSE, col="purple") +
+  ggtitle("Regressão linear para a reabertura")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+
+  xlab("")
+
+x<- 
+lm(data=dados_ms, formula=obitosNovos ~ data)
+```
+Vemos então, que em ambos os casos parecem em queda, com uma queda um pouco mais acentuada na medida de uso de máscaras, como vimos antes, existe uma sobreposição muito grande, então é mais difícil separar seus efeitos, no caso dos óbitos como a sobreposição é maior, vemos essa influência mais claramente ao comparar a diferença entre os ângulos das linhas de tendência.
+
+Agora vamos analisar uma relação entre os casos e os óbitos.
+
+## Da Relação:
+
+
+```{r}
+#Pré load
+library("tidyverse")
+
+OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
+REABRE_COMERCIO <- as.Date("2020-07-6")
+BAR_22 <- as.Date("2020-08-6")
+
+dados_ms <-
+read.csv2("dados_ms.csv", sep=";") %>%
+  mutate(data=as.Date(data))
+
+
+death_ratio <- sum(dados_ms$casosNovos)/sum(dados_ms$obitosNovos)
+
+
+SRAG_DIAS <-
+  read.csv2("~/SRAG_DIAS.csv", sep=";") 
+
+SRAG_DIAS_DASA<- 
+  SRAG_DIAS[-c(1,5),]
+SRAG_DIAS_DASA<- 
+SRAG_DIAS_DASA[,c(1,2,3)]+c(2,5,14)
+
+MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","TEMPO_SINTOMAS"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+MAX_SINT_OBT <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+dados_ms <-
+read.csv2("dados_ms.csv", sep=";") %>%
+  mutate(data=as.Date(data))
+
+
+
+
+dados_ms_comp <-
+  dados_ms %>%
+        filter(data >= OBRIGATORIO_MASCARA) %>%
+  mutate(casosNovos=casosNovos,obitosNovos=obitosNovos*death_ratio)%>%
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  ungroup(semanaEpi) %>%
+  select(data,semanaEpi,casosNovos,obitosNovos)
+
+
+dados_ms_comp_semanas <-
+dados_ms_comp %>%
+        filter(data >= OBRIGATORIO_MASCARA) %>%
+
+  group_by(semanaEpi) %>%
+  filter(n() == 7) %>%
+  summarise(obitos=sum(obitosNovos),casos=sum(casosNovos)) %>%
+  ungroup
+
+
+OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
+REABRE_COMERCIO <- as.Date("2020-07-6")
+BAR_22 <- as.Date("2020-08-6")
+
+
+# 
+# sum(dados_ms_comp$obitosNovos)
+# sum(COVID_BRIO$new_deaths)
+# sum(dados_ms_comp$obitosNovos)
+# sum(COVID_BRIO$new_confirmed)
+MIN_SINT_OBT <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[2])+2
+media <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[3])+5
+maximo <- as.numeric(SRAG_DIAS$TEMPO_SINTOMAS[4])+14
+
+MIN_SINT_NOT <- SRAG_DIAS_DASA["25%","TEMPO_SINTOMAS"]
+MED_SINT_NOT <- SRAG_DIAS_DASA["50%","TEMPO_SINTOMAS"]
+MAX_SINT_NOT <- SRAG_DIAS_DASA["75%","TEMPO_SINTOMAS"]
+
+
+
+MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","SINTOMA_OBITO"]
+MED_SINT_OBT <- SRAG_DIAS_DASA["50%","SINTOMA_OBITO"]
+MAX_SINT_OBT <- SRAG_DIAS_DASA["75%","SINTOMA_OBITO"]
+
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=REABRE_COMERCIO+MIN_SINT_NOT & data<=REABRE_COMERCIO+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+library(ggrepel)
+
+REABRE_COMERCIO_SEM_MAX <- max(SEM_MED)
+REABRE_COMERCIO_SEM_MIN <- min(SEM_MED)
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=OBRIGATORIO_MASCARA+MIN_SINT_NOT & data<=OBRIGATORIO_MASCARA+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+MASK_SEM_MAX <- max(SEM_MED)
+MASK_SEM_MIN <- min(SEM_MED)
+
+
+SEM_MED <-
+dados_ms %>%
+  filter(data>=BAR_22+MIN_SINT_NOT & data<=BAR_22+MAX_SINT_NOT) %>%
+  select(semanaEpi) %>%
+  unique()
+
+BAR22_SEM_MAX <- max(SEM_MED)
+BAR22_SEM_MIN <- min(SEM_MED)
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+
+
+
+
+SRAG_DIAS_DASA<-
+SRAG_DIAS_DASA %>%
+  mutate(diff=-SRAG_DIAS_DASA$NOTIFICACAO_OBITOS+SRAG_DIAS_DASA$SINTOMA_OBITO)
+
+
+
+```
+Para começar essa análise será necessário calcular a diferença de dias entre sintomas e notificações e sintomas e óbitos, para isso usaremos os dados da tabela para subtrair os valores de sintomas e notificação dos valores de sintomas e óbitos.
+Uma vez com esse valor, vamos atrasar os dados dos óbitos para podermos comparar seus efeitos com os casos e multiplicar os óbitos pela diferença entre os números de novos casos e novos óbitos. 
+Vamos agora plotar um gráfico desses dados:
+```{r}
+plot_compara <-
+  dados_ms_comp %>%
+  #filtra data
+  filter(data >= OBRIGATORIO_MASCARA) %>%
+  #   group_by(semanaEpi) %>%
+  # filter(n() == 7) %>%
+  # ungroup()%>%
+   ggplot( aes(x=data-SRAG_DIAS_DASA$diff[2], y=obitosNovos)) +
+      xlab("")+  ylab("Novos Óbitos vezes a diferença\ne Novos Casos" ) +
+        scale_colour_manual(name = 'Legenda', 
+         values =c('blue','red'), 
+	breaks=c("NovosCasos","NovosObitos"),
+	 labels = c('Novos Casos','Novos Óbitos'))
+    #  scale_y_continuous(limits = c(0,200)) +
+```
+```{r}
+plot_compara +
+  geom_line(aes(colour="NovosObitos"),se = FALSE)+
+  geom_line(aes(x=data,y=casosNovos,colour="NovosCasos"),se = FALSE)+
+       ggtitle("Comparação entre óbitos vezes a diferença, com novos casos")+
+     theme(plot.title = element_text(hjust = 0.5),
+           axis.text.y = element_blank())
+
+```
+
+Transformando em linhas temos o gráfico a seguir:
+
+```{r}
+plot_compara +
+     ggtitle("Comparação entre óbitos vezes a diferença, com novos casos")+
+     theme(plot.title = element_text(hjust = 0.5),
+           axis.text.y = element_blank())+
+
+  geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+  geom_smooth(aes(x=data,y=casosNovos,colour="NovosCasos"),se = FALSE)+
+            coord_cartesian(ylim=c(0,max(dados_ms_comp$casosNovos))
+)
+```
+
+```{r}
+
+# library(scales)
+
+#   dados_ms_comp %>%
+#   #filtra data
+#   filter(data >= OBRIGATORIO_MASCARA) %>%
+#    ggplot( aes(x=data-SRAG_DIAS_DASA$diff[2], y=obitosNovos)) 
+# max(dados_ms_comp$data)
+#       scale_y_continuous(limits = c(0,4000)) 
+
+
+# 
+# #desativado 22
+# plot_compara +
+#   # scale_x_date(limits = c(OBRIGATORIO_MASCARA,
+#   #                               max(dados_ms_comp$data)), labels=date_format("%B") )+
+#   geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+#   geom_smooth(aes(x=data,y=casosNovos),aes(colour="NovosCasos"),se = FALSE)+
+#             coord_cartesian(xlim=c(OBRIGATORIO_MASCARA+SRAG_DIAS_DASA$diff[2]-1, max(dados_ms_comp$data)-SRAG_DIAS_DASA$diff[2]-2),ylim=c(0,max(dados_ms_comp$obitosNovos))
+# )
+
+
+
+```
+
+Agora relacionaremos as linhas com as medidas, usando os valores para sintomas.
+
+```{r}
+plot_ms_medidas <- 
+  plot_compara+
+     annotate("rect",xmin = REABRE_COMERCIO+MIN_SINT_NOT, xmax = REABRE_COMERCIO+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = OBRIGATORIO_MASCARA+MIN_SINT_NOT, xmax = OBRIGATORIO_MASCARA+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = BAR_22+MIN_SINT_NOT, xmax = BAR_22+MAX_SINT_NOT, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      
+      
+        xlab("")+  ylab("Comparação entre óbitos vezes a diferença, com novos casos" )+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA),col="purple", alpha=.7) +
+  #       geom_point(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms_comp$casosNovos)*.75))+
+  # 
+  # geom_label(aes(x=OBRIGATORIO_MASCARA,y=max(dados_ms_comp$casosNovos)*.75, label = "Máscara\nObrigatória"),
+  #           colour = "black",
+  #           family="Courier",
+  #           hjust = 0.5,
+  #           vjust = -.4,
+  #           angle = 0,
+  #           size = 5,
+  #           alpha=1)+
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MIN_SINT_NOT,col="purple",se = FALSE) +
+      geom_vline(xintercept = as.numeric(OBRIGATORIO_MASCARA)+MAX_SINT_NOT,col="purple",se = FALSE) +
+geom_point(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.875 ))+
+  geom_label(aes(x=OBRIGATORIO_MASCARA+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.875, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO),col="black", alpha=.7) +
+geom_point(aes(x=REABRE_COMERCIO,y=max(dados_ms_comp$casosNovos)*.875 ))+
+  geom_label(aes(x=REABRE_COMERCIO,y=max(dados_ms_comp$casosNovos)*.875, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MAX_SINT_NOT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(REABRE_COMERCIO)+MIN_SINT_NOT,col="purple",se = FALSE) +
+geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ))+
+  geom_label(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  geom_vline(xintercept = as.numeric(BAR_22),col="purple", alpha=.7) +
+geom_point(aes(x=BAR_22, y=max(dados_ms_comp$casosNovos)*.875 ))+
+  geom_label(aes(x=BAR_22, y=max(dados_ms_comp$casosNovos)*.875, label = "BAR até 22h"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  geom_vline(xintercept = as.numeric(BAR_22)+MIN_SINT_NOT,col="purple",se = FALSE) +
+  geom_vline(xintercept = as.numeric(BAR_22)+MAX_SINT_NOT,col="purple",se = FALSE) +
+
+  geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ))+
+  geom_label(aes(x=BAR_22+MAX_SINT_NOT, y=max(dados_ms_comp$obitosNovos), label = "BAR até 22h +MAX_SINT_NOT"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+      xlab("")+  ylab("Comparação entre óbitos vezes a diferença, com novos casos" )
+  # 
+  # plot_ms_medidas +
+  #   geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+  #   geom_smooth(aes(x=data,y=casosNovos),aes(colour="NovosCasos"),se = FALSE)#+
+  #               scale_y_continuous(limits = c(0,4000)) 
+
+    plot_ms_medidas +
+    geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+    geom_smooth(aes(x=data,y=casosNovos,colour="NovosCasos"),se = FALSE)+
+            #scale_y_continuous(limits = c(0,4000)) +
+            coord_cartesian(xlim=c(OBRIGATORIO_MASCARA+SRAG_DIAS_DASA$diff[2]-3, max(dados_ms_comp$data)-SRAG_DIAS_DASA$diff[2]+10),ylim=c(0,max(dados_ms_comp$casosNovos)+600))+
+             ggtitle("Comparação entre óbitos vezes a diferença, com novos casos")+
+     theme(plot.title = element_text(hjust = 0.5),
+           axis.text.y = element_blank())+
+        xlab("")+  ylab("Novos Óbitos vezes a diferença\ne Novos Casos" ) #+
+
+  
+#   plot_ms_medidas +
+#     geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+#     geom_smooth(aes(x=data,y=casosNovos),aes(colour="NovosCasos"),se = FALSE)+
+#             #scale_y_continuous(limits = c(0,4000)) +
+#             coord_cartesian(xlim=c(OBRIGATORIO_MASCARA+SRAG_DIAS_DASA$diff[2]-1, max(dados_ms_comp$data)-SRAG_DIAS_DASA$diff[2]-2),ylim=c(0,max(dados_ms_comp$casosNovos)+600)
+# )+
+#     
+#       geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ))+
+#         geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ))+
+#       geom_point(aes(x=REABRE_COMERCIO+MAX_SINT_NOT,y=max(dados_ms_comp$casosNovos)*.75 ))
+# # dados_ms_comp <-
+# #   get_corona_minsaude(uf="SP") %>%
+# #   filter(codmun == "355030")
+  
+```
+
+Notamos acima que há um aumento na diferença entre as linhas, aproximadamente no meio dos efeitos da reabertura.
+Agora vamos fazer uma comparação entre os casos e sintomas usando as semanas:
+```{r}
+OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
+
+dados_ms_compara_semanas <-
+dados_ms_comp%>%
+  filter(data>=OBRIGATORIO_MASCARA)%>%
+#  mutate(casosNovos=lag(casosNovos,SRAG_DIAS_DASA$diff[2]),obitosNovos=obitosNovos) %>%
+  select(obitosNovos,casosNovos,semanaEpi)%>%
+#  drop_na() %>%
+  group_by(semanaEpi) %>%
+  # filter(n() == 7) %>%
+  summarise(obitos=sum(obitosNovos),casos=sum(casosNovos))
+
+# dados_ms_compara_semanas%>%
+#    ggplot( aes(x=semanaEpi, y=obitos)) +
+#        # geom_line(aes(colour="NovosObitos")) +
+#        # geom_line(aes(x=semanaEpi, y=casos),aes(colour="NovosCasos")) +
+#        geom_smooth(aes(colour="NovosObitos")) +
+#        geom_smooth(aes(x=semanaEpi, y=casos),aes(colour="NovosCasos")) +
+# 
+#       xlab("")+  ylab("Novos Casos")
+
+
+dados_ms_compara_semanas%>%
+  
+   ggplot( aes(x=semanaEpi, y=obitos)) +
+        scale_colour_manual(name = 'Legenda', 
+         values =c('blue','red'), 
+	breaks=c("NovosCasos","NovosObitos"),
+	 labels = c('Novos Casos','Novos Óbitos'))+
+       # geom_line(aes(x=lag(semanaEpi,1),y=obitos),aes(colour="NovosObitos")) +
+       # geom_line(aes(x=semanaEpi, y=casos),aes(colour="NovosCasos")) +
+
+              coord_cartesian(xlim=c(min(dados_ms_compara_semanas$semanaEpi), max(dados_ms_compara_semanas$semanaEpi)),ylim=c(0,max(dados_ms_compara_semanas$casos)+600+20000))+
+      xlab("")+  ylab("Novos Casos")+
+  
+   annotate("rect",xmin = REABRE_COMERCIO_SEM_MIN, xmax = REABRE_COMERCIO_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = MASK_SEM_MIN, xmax = MASK_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+      annotate("rect",xmin = BAR22_SEM_MIN, xmax = BAR22_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
+
+  theme(plot.title = element_text(hjust = 0.5))+
+     geom_vline(xintercept = as.numeric(MASK_SEM_MIN),col="purple", alpha=.7) +
+    geom_vline(xintercept = BAR22_SEM_MAX,col="purple") +
+
+     geom_point(aes(x=MASK_SEM_MIN,y=max(dados_ms_comp_semanas$casos)*1.4))+
+     geom_vline(xintercept = MASK_SEM_MIN,col="purple") +
+     geom_vline(xintercept =MASK_SEM_MAX,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MIN,col="purple") +
+     geom_vline(xintercept =REABRE_COMERCIO_SEM_MAX,col="purple") +
+
+
+  geom_label(aes(x=MASK_SEM_MIN,y=max(dados_ms_comp_semanas$casos)*1.4, label = "Máscara\nObrigatória"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+geom_point(aes(x=MASK_SEM_MAX,y=max(dados_ms_comp_semanas$casos)*1.4 +500))+
+  geom_label(aes(x=MASK_SEM_MAX,y=max(dados_ms_comp_semanas$casos)*1.4 +500, label = "Linha máxima de\nefeitos do uso de máscara"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+  # restaurante ate as 22h
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_comp_semanas$casos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MIN,y=max(dados_ms_comp_semanas$casos)*1.2, label = "Reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+
+geom_point(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_comp_semanas$casos)*1.2 ))+
+  geom_label(aes(x=REABRE_COMERCIO_SEM_MAX,y=max(dados_ms_comp_semanas$casos)*1.2 ,label = "Linha máxima de\nefeitos da reabertura"),
+            colour = "black",
+            family="Courier",
+            hjust = 0.5,
+            vjust = -.4,
+            angle = 0,
+            size = 5,
+            alpha=1,
+            position="dodge")+
+  # geom_vline(xintercept = BAR22_SEM_MIN,col="purple", alpha=.7) +
+  geom_point(aes(x=BAR22_SEM_MIN, y=(max(dados_ms_comp_semanas$casos)*1.2)+12000))+
+  geom_label(aes(x=BAR22_SEM_MIN, y=(max(dados_ms_comp_semanas$casos)*1.2)+12000, label = "BAR até 22h"),
+            colour = "black",
+            family="Courier",
+            hjust = .5,
+            vjust = -.5,
+            angle = 0,
+            size = 5,
+            alpha=1)+
+         #    coord_cartesian(xlim=c(OBRIGATORIO_MASCARA+SRAG_DIAS_DASA$diff[2]-3, max(dados_ms_comp$data)-SRAG_DIAS_DASA$diff[2]+10),ylim=c(0,max(dados_ms_comp$casosNovos)+600))+
+               coord_cartesian(xlim=c(MASK_SEM_MIN-1,
+                                      max(dados_ms_comp_semanas$semanaEpi)+1),ylim=c(0,40000))+
+         geom_smooth(aes(x=semanaEpi, y=casos,colour="NovosCasos")) +
+       geom_smooth(aes(x=lag(semanaEpi,1),y=obitos,colour="NovosObitos")) +
+  
+      xlab("")+  ylab("Novos Óbitos vezes a diferença\ne Novos Casos" ) +
+
+  ggtitle("Regressão não linear em comparação as medidas\npor semana epidemologica")
+
+
+
+```
+
+```{r}
+# comparativo <-
+  # dados_ms_comp %>%
+  # #filtra data
+  # filter(data >= OBRIGATORIO_MASCARA) %>%
+  # mutate(data=data, casos=lag(casosNovos,SRAG_DIAS_DASA$diff[2]), obitos=obitosNovos) %>%
+  # filter(semanaEpi>=30&semanaEpi<=32)
+#   
+# 
+# comparativo%>%
+#   ggplot(aes(x=data,y=diferenca))+
+#   geom_line()+
+#   geom_smooth(se=FALSE)+
+#   annotate("rect",xmin = as.Date("2020-07-19"), xmax = as.Date("2020-08-02"), ymin = -Inf, ymax =Inf,alpha=.3,fill="yellow")+
+#          ggtitle("Diferença entre casos e óbitos")+
+#      theme(plot.title = element_text(hjust = 0.5),
+#            axis.text.y = element_blank())
+#  
+# 
+# comparativo %>%
+#     group_by(semanaEpi) %>%
+#   # filter(n() == 7) %>%
+#   summarise(obitos=sum(obitos),casos=sum(casos),diferenca=sum(obitos/casos)) %>%
+#   # mutate(diferenca=+(obitos/casos))%>%
+#     select(casos,obitos,semanaEpi,diferenca) %>%
+#   ggplot(aes(x=semanaEpi,y=diferenca))+
+#   geom_line(method=lm)
+#   #  geom_smooth(se=FALSE)
+# 
+# dados_ms_comp %>%
+#   filter(data>=)
+#   mutate(diferença=casosNovos/obitosNovos)%>%
+#     ggplot(aes(x=data,y=diferença))+
+#   geom_smooth()+
+#     geom_line()+
+#     annotate("rect",xmin = as.Date("2020-07-19"), xmax = as.Date("2020-08-02"), ymin = -Inf, ymax =Inf,alpha=.3,fill="yellow")
+# 
+
+
+```
+```{r}
+# dados_ms_comp_semanas %>%
+#   mutate(diferença=casos/obitos)%>%
+#     ggplot(aes(x=semanaEpi,y=diferença))+
+#   geom_smooth()+
+#     annotate("rect",xmin = 30, xmax = 32, ymin = -Inf, ymax =Inf,alpha=.3,fill="yellow")+
+#   geom_line()
+
+```
+
+É notável que houve um aumento dos testes durante o período da semana 30 até a 32, que seriam os dias 19 de julho até 2 de agosto. 
+Comparando esses dados com as linhas por dias, encontramos aonde houve esse aumento na diferença.
+
+```{r}
+plot_compara +
+  # scale_x_date(limits = c(OBRIGATORIO_MASCARA,
+  #                               max(dados_ms_comp$data)), labels=date_format("%B") )+
+  geom_smooth(aes(colour="NovosObitos"),se = FALSE)+
+        annotate("rect",xmin = as.Date("2020-07-19"), xmax = as.Date("2020-08-02"), ymin = -Inf, ymax =Inf,alpha=.3,fill="yellow")+
+       xlab("")+  ylab("Novos Óbitos vezes a diferença\ne Novos Casos" ) +
+
+  geom_smooth(aes(x=data,y=casosNovos, colour="NovosCasos"),se = FALSE)+
+            coord_cartesian(xlim=c(OBRIGATORIO_MASCARA+SRAG_DIAS_DASA$diff[2]-1, max(dados_ms_comp$data)-SRAG_DIAS_DASA$diff[2]),ylim=c(0,max(dados_ms_comp$casosNovos)))+
+         ggtitle("Destaque na maior diferença")+
+     theme(plot.title = element_text(hjust = 0.5),
+           axis.text.y = element_blank())
+
+```
+
+Com uma linha de tendência vemos que no geral houve um aumento nos testes, no gráfico vemos que houve uma queda, nos casos os dados faltantes no gráfico, são dias notificados com 0 casos ou 0 óbitos.
+
+```{r}
+
+dados_ms_comp %>% 
+  mutate(casosNovos = ifelse(casosNovos == 0, NA, casosNovos),
+           obitosNovos = ifelse(obitosNovos == 0, NA, obitosNovos)) %>%
+#filtra data
+filter(data >= OBRIGATORIO_MASCARA) %>%
+mutate(data=data, casos=lag(casosNovos,SRAG_DIAS_DASA$diff[2]), obitos=obitosNovos) %>%
+  mutate(diferenca=casos/obitos) %>%
+filter(semanaEpi>=30&semanaEpi<=32) %>%
+
+  ggplot(aes(x=data,y=diferenca))+
+  geom_line()+
+  geom_smooth(method = lm,se=FALSE,col="yellow")+
+             ggtitle("Regressão linear da diferença")+
+     theme(plot.title = element_text(hjust = 0.5))#,
+           # axis.text.y = element_blank())
+
+```
+
+## Conclusão:
+
+Percebemos com esse estudo uma grande relação das médias de dias a partir dos sintomas, com os novos casos e óbitos, o que comprova que essa relação funciona para ter uma visão geral dos efeitos da implementação das medidas. Vemos que houve de fato um aumento nos testes, porém, apesar de ainda ser maior nos últimos dados do que no início das medidas, tendo seu pico durante os efeitos das medidas de reaberturas, parece ter sido uma situação mais pontual, provavelmente por exigências das medidas adotadas durante a reabertura.
+
+Durante o período de efeitos das medidas de obrigatoriedade do uso de máscaras e reabertura, é observável os efeitos de uma mediada sobre a outra, isso demonstra na prática a importância de uma contra medida para equilíbrio dos afrouxamentos e reabertura.
+
+Levando em conta o aumento nos casos e nos óbitos, ainda que pequeno e tendendo a uma certa “estabilidade”, vemos que continuam em crescimento, por isso, vendo o sucesso de uma aplicação de uma contramedida, o ideal seria que conforme continuam a redução das restrições, fossem adotadas medidas para balanceá-las.
+
+Algumas medidas que poderiam ser adotadas seriam:
+
+1- Alternância de horários de entrada e saída de expedientes, por cargos e regiões, o que poderia diminuir o contato e as aglomerações em principal nos transportes públicos.
+
+2-
+
+3-
+
+
+### Referências:
+https://opendatasus.saúde.gov.br/dataset/bd-srag-2020
+https://dasa.com.br/blog-coronavírus/primeiros-sintomas-do-coronavírus
+
+### Sobre:
+*Esse estudo foi elaborado por Vitor Veloso, é um estudo independente e sem participação de outras pessoas, por conta disso muitas coisas ainda podem ser melhoradas, mas não possuo tempo, pessoas, ou mesmo emprego para poder mantê-lo atualizado e com o código limpo, o ideal seria rescrever o código do zero a fim de padronizar e deixar mais compreensível. 
+O código fonte pode ser encontrado em:
+https://github.com/vvitorveloso/politicas_publicas_covid

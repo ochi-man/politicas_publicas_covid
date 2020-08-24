@@ -1,0 +1,228 @@
+---
+title: "Untitled"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r}
+#FUNÇÂO
+#https://stackoverflow.com/questions/4787332/how-to-remove-outliers-from-a-dataset
+
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+  }
+```
+
+```{r}
+#CARREGA SRAG
+
+#https://s3-sa-east-1.amazonaws.com/ckan.saude.gov.br/SRAG/2020/INFLUD-10-08-2020.csv
+
+library(tidyverse)
+#escolhe o arquivo
+file <- "/home/ochi/Documents/CPM/COVID/INFLUD-10-08-2020.csv"
+#Verifica a codificação LINUX
+encode <- as.character(read.table(pipe(paste("uchardet ",file))))
+#Lê os dados
+SRAG <- read.csv2(
+  file ,
+  fileEncoding=encode, 
+  header =TRUE ,
+  sep=";",
+  skipNul=TRUE,
+  na.strings=c("NA","NaN", " ","")) %>%
+  filter(CO_MUN_NOT == "355030")
+  #filter(CO_MUN_NOT == "3550308")
+  #CHECA MUNI
+  #SRAG %>% filter(ID_MUNICIP== "SAO PAULO")
+
+SRAG <-
+  SRAG %>% 
+  select(DT_SIN_PRI,DT_NOTIFIC,DT_EVOLUCA,EVOLUCAO) #%>%
+
+#str(SRAG$DT_NOTIFIC)
+#str(SRAG$DT_SIN_PRI)
+
+
+
+# 
+# #diff(range(v3)) >= 6"
+# #SRAG %>%
+#   difftime(SRAG$DT_NOTIFIC, SRAG$DT_SIN_PRI ,units = "days")
+# gc()#
+#  as.Date(as.character(SRAG$DT_NOTIFIC),format="%Y/%m/%d") - as.Date(as.character(SRAG$DT_SIN_PRI),format="%Y/%m/%d")
+# 
+# 
+# 
+# difftime(strftime(SRAG$DT_NOTIFIC,"%Y/%m/%d") ,strftime(SRAG$DT_SIN_PRI,"%Y/%m/%d"),units = "days")
+# 
+# 
+#  as.Date(as.character(SRAG$DT_NOTIFIC)) - as.Date(as.character(SRAG$DT_SIN_PRI))
+# 
+# as.Date(as.character(SRAG$DT_NOTIFIC)) - as.Date(as.character("5-07-20"))
+#   
+# ?as.Date
+# 
+# as.Date(strptime(SRAG$DT_NOTIFIC,'%d/%m/%Y')) - as.Date(strptime(SRAG$DT_SIN_PRI,'%d/%m/%Y'))
+#rm(resultados)
+
+```
+
+Para isso usando os dados do SRAG, podemos então calcular qual a variação em dias, das notificações, do início dos sintomas e de obitos.
+
+Analisando os dados do SRAG, nota-se que existe uma grande quantidade de casos discrepantes, aparecem casos com mais de 200 dias de diferença entre o início dos sintomas e as notificações, considerando que isso ultrapassa qualquer tempo de infecção, será nescessária uma filtragem desses pontos.
+
+
+```{r}
+media_tempo_sintomas_notificacao <-
+SRAG %>% 
+  mutate(DT_NOTIFIC=strptime(SRAG$DT_NOTIFIC,'%d/%m/%Y'),DT_SIN_PRI=strptime(SRAG$DT_SIN_PRI,'%d/%m/%Y')) %>% 
+  mutate(tempo_raw = difftime(DT_NOTIFIC ,  DT_SIN_PRI ,units = "days")) %>%
+#  filter(tempo <= 50) %>%
+#  select(tempo) %>%
+  mutate(tempo = remove_outliers(as.numeric(tempo_raw))) 
+
+    boxplot(as.numeric(media_tempo_sintomas_notificacao$tempo_raw,na.rm = TRUE),main="Diferença de dias entre sintoma e notificação",cex.main=2,ylab="Dias",cex.axis=1.5,cex.lab=1.3)
+
+
+
+
+  
+#<- remove_outliers(as.numeric(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE))  
+#boxplot(remove_outliers(as.numeric(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)))
+TEMPO_SINTOMAS=
+  data.frame( TEMPO_SINTOMAS =
+               quantile(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
+             )
+    
+#   quantile(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE) 
+#   ?quantile
+# # min(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
+#  # mean(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
+# # max(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
+# 
+# options(digits=2)
+# TEMPO_SINTOMAS = data.frame(name = c("min","mean","max"), TEMPO_SINTOMAS = c(
+#                 min(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE),
+#                            mean(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE),
+#                            max(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
+# ))
+
+
+```
+Após filtrar os dados discrepantes, temos um gráfico muito mais cooerente com a realidade.
+
+```{r}
+    boxplot(as.numeric(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE),main="Dados filtrados, dias entre sintoma e notificação",cex.main=2,ylab="Dias",cex.axis=1.5,cex.lab=1.3)
+
+```
+
+```{r}
+#EVOLUCAO 2= obito por covid 3 = outras causa
+media_tempo_notificacao_obito <-
+SRAG %>%
+  filter(EVOLUCAO == "2") %>%
+  select(DT_NOTIFIC,DT_EVOLUCA) %>%
+  mutate(DT_EVOLUCA=strptime(DT_EVOLUCA,'%d/%m/%Y'), DT_NOTIFIC=strptime(DT_NOTIFIC,'%d/%m/%Y')) %>% 
+  mutate(tempo = difftime(DT_EVOLUCA, DT_NOTIFIC ,units = "days")) %>%
+#  filter(tempo <= 50 & 
+  filter(tempo >= 0) %>%
+  mutate(tempo = remove_outliers(as.numeric(tempo))) 
+
+
+
+# min(media_tempo_notificacao_obito$tempo,na.rm = TRUE)
+# mean(media_tempo_notificacao_obito$tempo,na.rm = TRUE)
+# max(media_tempo_notificacao_obito$tempo,na.rm = TRUE)
+options(digits=2)
+
+
+NOTIFICACAO_OBITOS=
+  data.frame( NOTIFICACAO_OBITOS =
+               quantile(media_tempo_notificacao_obito$tempo,na.rm = TRUE)
+             )
+
+# NOTIFICACAO_OBITOS = data.frame(name = c("min","mean","max"), NOTIFICACAO_OBITOS
+#  = c(
+#                 min(media_tempo_notificacao_obito$tempo,na.rm = TRUE),
+#                            mean(media_tempo_notificacao_obito$tempo,na.rm = TRUE),
+#                            max(media_tempo_notificacao_obito$tempo,na.rm = TRUE)
+# ))
+
+
+```
+
+```{r}
+#EVOLUCAO 2= obito por covid 3 = outras causa
+media_tempo_sintoma_obito <-
+SRAG %>%
+  filter(EVOLUCAO == "2") %>%
+  select(DT_SIN_PRI,DT_EVOLUCA) %>%
+  mutate(DT_EVOLUCA=strptime(DT_EVOLUCA,'%d/%m/%Y'), DT_SIN_PRI=strptime(DT_SIN_PRI,'%d/%m/%Y')) %>% 
+  mutate(tempo = difftime(DT_EVOLUCA, DT_SIN_PRI ,units = "days")) %>%
+  # filter(tempo <= 50 & tempo >= 0) 
+  filter(tempo >= 0) %>%
+  mutate(tempo = remove_outliers(as.numeric(tempo))) 
+
+
+options(digits=2)
+
+
+
+SINTOMA_OBITO=
+  data.frame( SINTOMA_OBITO =
+               quantile(media_tempo_sintoma_obito$tempo,na.rm = TRUE)
+             )
+# 
+# SINTOMA_OBITO = data.frame(name = c("min","mean","max"), SINTOMA_OBITO = c(
+#                 min(media_tempo_sintoma_obito$tempo,na.rm = TRUE),
+#                            mean(media_tempo_sintoma_obito$tempo,na.rm = TRUE),
+#                            max(media_tempo_sintoma_obito$tempo,na.rm = TRUE)
+# ))
+
+# min(media_tempo_sintoma_obito$tempo,na.rm = TRUE)
+# mean(media_tempo_sintoma_obito$tempo,na.rm = TRUE)
+# max(media_tempo_sintoma_obito$tempo,na.rm = TRUE)
+```
+
+Agora vamos aplicar este mesmo conceito em outas comparações, temos então em dias:
+```{r}
+SRAG_DIAS<- 
+  cbind(SINTOMA_OBITO , NOTIFICACAO_OBITOS , TEMPO_SINTOMAS) %>%
+  select(SINTOMA_OBITO , NOTIFICACAO_OBITOS , TEMPO_SINTOMAS)
+# %>%
+#   mutate(name = c("min","mean","max")) %>%
+#   select(name,everything())
+
+SRAG_DIAS
+```
+
+Aonde, SINTOMA_OBITO é o tempo que leva da aparição dos sintomas até o obito, NOTIFICACAO_OBITOS é o tempo que leva da notificação do caso até o obito, e finalmente TEMPO_SINTOMAS, que é o tempo que leva aparição dos sintomas até a devida notificação.
+
+Note que nesses dados não estou considerando os casos com dias negativos, visto que esses são notificações em atraso, motivo de um outro estudo a parte.
+```{r}
+rm(SRAG)
+rm(media_tempo_notificacao_obito)
+rm(media_tempo_sintoma_obito)
+rm(media_tempo_sintomas_notificacao)
+rm(SINTOMA_OBITO)
+rm(TEMPO_SINTOMAS)
+rm(NOTIFICACAO_OBITOS)
+gc()
+write.table(SRAG_DIAS, "~/SRAG_DIAS.csv", sep=";") 
+```
+
+Considerando que queremos o mais próximo de uma média, para fins de uma análise mais próxima a realidade, pegaremos então os dados do segundo ao terceiro quartil, pois como é possivel notar, a variação para o terceiro para o quarto mais do que dobra, o que indica dados mais dispersos, como o objetivo do estudo é a análise das politicas publica, por outro lado o primeiro quartil apresenta valor 0, o que dificulta uma visão mais realista, essas valores então podem por hora ser desconsiderados.
