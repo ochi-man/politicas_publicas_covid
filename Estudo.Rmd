@@ -36,10 +36,12 @@ A proposta desse documento é ser o mais visual e simplificado possível.
 Abaixo vemos a tabela de dados relativos a diferença dos dias entre sintomas, notificações e óbitos, nesses dados foram filtrados os pontos discrepantes:
 ```{r}
 #install.packages("ggspectra")
-library(ggspectra)
+#library(ggspectra)
 #remotes::install_github("liibre/coronabr")
 library(coronabr)
 library(tidyverse) 
+library(gridExtra)
+library(grid)
 
 #?get_corona_minsaude
 #?get_corona_br
@@ -51,13 +53,24 @@ library(tidyverse)
 # 
 # COVID_BRIO <- get_corona_br(ibge_cod = "3550308")
 # 
+```
 
+```{r}
+# #Descomente a linha abaixo para atualizar os dados
+# #para rodar varias vezes sobrecarrega, então utilize o arquivo como cache
+# file.remove("dados_ms.csv")
+```
 
+```{r}
+if(  !file.exists("dados_ms.csv"))  {
+dados_ms <-
+  get_corona_minsaude(uf="SP") %>%
+  filter(codmun == "355030")
+write.csv2(dados_ms,"dados_ms.csv", sep=";")
+}
+```
 
-# dados_ms <- 
-#   get_corona_minsaude(uf="SP") %>% 
-#   filter(codmun == "355030")
-
+```{r}
 OBRIGATORIO_MASCARA <-   as.Date("2020-07-2")
 REABRE_COMERCIO <- as.Date("2020-07-6")
 BAR_22 <- as.Date("2020-08-6")
@@ -114,10 +127,10 @@ MIN_SINT_OBT <- SRAG_DIAS_DASA["25%","SINTOMA_OBITO"]
 MED_SINT_OBT <- SRAG_DIAS_DASA["50%","SINTOMA_OBITO"]
 MED_SINT_OBT <- SRAG_DIAS_DASA["75%","SINTOMA_OBITO"]
 
-SRAG_DIAS %>%
+grid.table(SRAG_DIAS %>%
   select("Sintomas e óbito"=SINTOMA_OBITO,
          "Notificação e óbito"=NOTIFICACAO_OBITOS,
-         "Sintomas e notificação"=TEMPO_SINTOMAS)
+         "Sintomas e notificação"=TEMPO_SINTOMAS))
 
 ```
 
@@ -127,11 +140,10 @@ Entre 2 à 14 dias para os sintomas e 5 dias sendo o valor mais comum.
 Por haver uma variação muito grande, filtraremos os dados, mantendo apenas o intervalo de 25% até 75%:
 ```{r}
 
-
-SRAG_DIAS_DASA%>%
+grid.table(SRAG_DIAS_DASA%>%
   select("Sintomas e óbito"=SINTOMA_OBITO,
          "Notificação e óbito"=NOTIFICACAO_OBITOS,
-         "Sintomas e notificação"=TEMPO_SINTOMAS)
+         "Sintomas e notificação"=TEMPO_SINTOMAS))
 
 ```
 
@@ -320,7 +332,7 @@ Para confirmar essa linha, vamos fazer outra para os dados por semanas:
 
 
 plot_ms_semanas+
-  geom_smooth(aes(colour="NovosCasos"))+
+  geom_smooth(aes(colour="NovosCasos"),se=FALSE)+
   geom_line() +
     
   ggtitle("Regressão não linear de casos por semana epidemologica")
@@ -386,7 +398,7 @@ BAR22_SEM_MIN <- min(SEM_MED)
 
 #dados_ms_semanas$
 plot_ms_semanas+
-  geom_smooth(aes(colour="NovosCasos")) +
+  geom_smooth(aes(colour="NovosCasos"),se=FALSE) +
 
    annotate("rect",xmin = REABRE_COMERCIO_SEM_MIN, xmax = REABRE_COMERCIO_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
       annotate("rect",xmin = MASK_SEM_MIN, xmax = MASK_SEM_MAX, ymin = -Inf, ymax =Inf,alpha=.3,fill="purple")+
