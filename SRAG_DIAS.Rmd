@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "SRAG - Média de sintomas e obitos - COVID"
 output:
   word_document: default
   html_document: default
@@ -11,8 +11,14 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
                       echo=FALSE, warning=FALSE, message=FALSE)
 ```
 
+```{r librarys}
+library(tidyverse)
+library(uchardet)
 
-```{r}
+```
+
+
+```{r remove_outliers}
 #FUNÇÂO
 #https://stackoverflow.com/questions/4787332/how-to-remove-outliers-from-a-dataset
 
@@ -26,16 +32,33 @@ remove_outliers <- function(x, na.rm = TRUE, ...) {
   }
 ```
 
-```{r}
-#CARREGA SRAG
+```{r pega diretorio local}
+script_dir = dirname(rstudioapi::getActiveDocumentContext()$path)
+```
 
-#https://s3-sa-east-1.amazonaws.com/ckan.saude.gov.br/SRAG/2020/INFLUD-10-08-2020.csv
+```{r SRAG DOWNLOAD}
+link <-
+grep("csv",
+     getHTMLLinks(
+       getURL(
+         "https://opendatasus.saude.gov.br/pt_BR/dataset/bd-srag-2020", 
+         ssl.verifypeer = FALSE)
+     )
+     ,value=TRUE)
 
-library(tidyverse)
-#escolhe o arquivo
-file <- "/home/ochi/Documents/CPM/COVID/INFLUD-10-08-2020.csv"
-#Verifica a codificação LINUX
-encode <- as.character(read.table(pipe(paste("uchardet ",file))))
+file <- paste0(script_dir,"/",basename(link))
+
+if(!file.exists(file)){
+      download.file(link, file)
+}
+
+```
+
+
+```{r SRAG LOAD}
+
+encode <- uchardet::detect_file_enc(file)
+
 #Lê os dados
 SRAG <- read.csv2(
   file ,
@@ -44,40 +67,8 @@ SRAG <- read.csv2(
   sep=";",
   skipNul=TRUE,
   na.strings=c("NA","NaN", " ","")) %>%
-  filter(CO_MUN_NOT == "355030")
-  #filter(CO_MUN_NOT == "3550308")
-  #CHECA MUNI
-  #SRAG %>% filter(ID_MUNICIP== "SAO PAULO")
-
-SRAG <-
-  SRAG %>% 
-  select(DT_SIN_PRI,DT_NOTIFIC,DT_EVOLUCA,EVOLUCAO) #%>%
-
-#str(SRAG$DT_NOTIFIC)
-#str(SRAG$DT_SIN_PRI)
-
-
-
-# 
-# #diff(range(v3)) >= 6"
-# #SRAG %>%
-#   difftime(SRAG$DT_NOTIFIC, SRAG$DT_SIN_PRI ,units = "days")
-# gc()#
-#  as.Date(as.character(SRAG$DT_NOTIFIC),format="%Y/%m/%d") - as.Date(as.character(SRAG$DT_SIN_PRI),format="%Y/%m/%d")
-# 
-# 
-# 
-# difftime(strftime(SRAG$DT_NOTIFIC,"%Y/%m/%d") ,strftime(SRAG$DT_SIN_PRI,"%Y/%m/%d"),units = "days")
-# 
-# 
-#  as.Date(as.character(SRAG$DT_NOTIFIC)) - as.Date(as.character(SRAG$DT_SIN_PRI))
-# 
-# as.Date(as.character(SRAG$DT_NOTIFIC)) - as.Date(as.character("5-07-20"))
-#   
-# ?as.Date
-# 
-# as.Date(strptime(SRAG$DT_NOTIFIC,'%d/%m/%Y')) - as.Date(strptime(SRAG$DT_SIN_PRI,'%d/%m/%Y'))
-#rm(resultados)
+  filter(CO_MUN_NOT == "355030") %>% 
+  select(DT_SIN_PRI,DT_NOTIFIC,DT_EVOLUCA,EVOLUCAO) 
 
 ```
 
@@ -99,27 +90,11 @@ SRAG %>%
 
 
 
-
-  
-#<- remove_outliers(as.numeric(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE))  
-#boxplot(remove_outliers(as.numeric(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)))
+?quantile
 TEMPO_SINTOMAS=
   data.frame( TEMPO_SINTOMAS =
                quantile(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
              )
-    
-#   quantile(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE) 
-#   ?quantile
-# # min(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
-#  # mean(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
-# # max(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
-# 
-# options(digits=2)
-# TEMPO_SINTOMAS = data.frame(name = c("min","mean","max"), TEMPO_SINTOMAS = c(
-#                 min(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE),
-#                            mean(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE),
-#                            max(media_tempo_sintomas_notificacao$tempo,na.rm = TRUE)
-# ))
 
 
 ```
@@ -222,7 +197,7 @@ rm(SINTOMA_OBITO)
 rm(TEMPO_SINTOMAS)
 rm(NOTIFICACAO_OBITOS)
 gc()
-write.table(SRAG_DIAS, "~/SRAG_DIAS.csv", sep=";") 
+write.table(SRAG_DIAS, paste0(script_dir,"/SRAG_DIAS.csv"), sep=";") 
 ```
 
-Considerando que queremos o mais próximo de uma média, para fins de uma análise mais próxima a realidade, pegaremos então os dados do segundo ao terceiro quartil, pois como é possivel notar, a variação para o terceiro para o quarto mais do que dobra, o que indica dados mais dispersos, como o objetivo do estudo é a análise das politicas publica, por outro lado o primeiro quartil apresenta valor 0, o que dificulta uma visão mais realista, essas valores então podem por hora ser desconsiderados.
+Considerando que queremos o mais próximo de uma média, para fins de uma análise mais próxima a realidade, pegaremos então os dados do segundo e o terceiro quartil, pois como é possivel notar, a variação do terceiro para o quarto mais do que dobra, o que indica dados mais dispersos, por outro lado o primeiro quartil apresenta valor 0, o que dificulta uma visão mais realista, como o objetivo do estudo é a análise das politicas publica, essas valores então podem por hora ser desconsiderados.
